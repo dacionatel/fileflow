@@ -19,8 +19,8 @@ CreateUninstallRegKey=yes
 UninstallDisplayIcon={app}\FileFlow.exe
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
-ArchitecturesAllowed=x64
-ArchitecturesInstallIn64BitMode=x64
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
 CloseApplications=yes
 
 [Languages]
