@@ -1,6 +1,6 @@
 ﻿[Setup]
 AppName=FileFlow
-AppVersion=1.0.0
+AppVersion=1.0.1
 AppPublisher=FileFlow
 AppPublisherURL=https://example.com
 AppSupportURL=https://example.com

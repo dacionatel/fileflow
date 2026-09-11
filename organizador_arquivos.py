@@ -195,21 +195,6 @@ def escolher_duplicados(grupos: list[list[Path]], pasta: Path, caminho_log: Path
         print(f"\n{enviados} arquivo(s) foram enviados para a Lixeira do Windows.")
 
 
-def nome_destino_disponivel(destino: Path) -> Path:
-    """Cria um sufixo numerado para nunca sobrescrever um arquivo."""
-    if not destino.exists():
-        return destino
-
-    contador = 1
-    while True:
-        candidato = destino.with_name(
-            f"{destino.stem}_{contador}{destino.suffix}"
-        )
-        if not candidato.exists():
-            return candidato
-        contador += 1
-
-
 def destino_do_arquivo(caminho: Path, pasta: Path) -> Path | None:
     extensao = caminho.suffix.lower()
     categoria = extensao[1:].upper() if extensao else "SemExtensao"
@@ -605,7 +590,17 @@ class OrganizadorGUI:
     def _criar_lista(self, pai: ttk.Frame) -> tk.Listbox:
         moldura = ttk.Frame(pai)
         moldura.pack(fill="both", expand=True)
-        lista = tk.Listbox(moldura, selectmode="extended", activestyle="none", font=("Segoe UI", 10))
+        lista = tk.Listbox(
+            moldura,
+            selectmode="extended",
+            activestyle="none",
+            font=("Segoe UI", 10),
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=1,
+            highlightbackground="#9ca3af",
+            highlightcolor="#2563eb",
+        )
         barra = ttk.Scrollbar(moldura, orient="vertical", command=lista.yview)
         lista.configure(yscrollcommand=barra.set)
         lista.pack(side="left", fill="both", expand=True)
@@ -654,13 +649,15 @@ class OrganizadorGUI:
             self.janela.update_idletasks()
         self._ultimo_percentual_atualizado = percentual
 
-    def _atualizar_progresso_movimentacao(self, indice: int, total: int, nome: str | None = None) -> None:
+    def _atualizar_progresso_movimentacao(
+        self, indice: int, total: int, nome: str | None = None, etapa: str = "transferência"
+    ) -> None:
         if total <= 0:
             percentual = 0
         else:
             percentual = min(100, max(0, int((indice / total) * 100)))
         titulo = f"{percentual}% - {nome}" if nome else f"{percentual}%"
-        self._atualizar_progresso(percentual, titulo, etapa="transferência")
+        self._atualizar_progresso(percentual, titulo, etapa=etapa)
         if nome:
             self.arquivo_atual.set(f"Arquivo atual: {nome}")
 
@@ -799,21 +796,6 @@ class OrganizadorGUI:
         self.lista_movimentos.insert(tk.END, f"{origem.relative_to(pasta)}  ->  {destino.relative_to(pasta)}")
         self.arquivo_atual.set(f"Arquivo em processamento: {origem.name}")
 
-    def _popular_lista_movimentos(self, pasta: Path, movimentos: list[tuple[Path, Path]], indice_inicial: int = 0, lote: int = 100) -> None:
-        limite = min(indice_inicial + lote, len(movimentos))
-        for i in range(indice_inicial, limite):
-            origem, destino = movimentos[i]
-            self.lista_movimentos.insert(tk.END, f"{origem.relative_to(pasta)}  ->  {destino.relative_to(pasta)}")
-            self.arquivo_atual.set(f"Arquivo em processamento: {origem.name}")
-
-        if limite < len(movimentos):
-            self.janela.after(0, lambda: self._popular_lista_movimentos(pasta, movimentos, limite, lote))
-            return
-
-        self.botao_mover.configure(state="normal")
-        self.status.set(f"{len(movimentos)} arquivo(s) pronto(s) para organizar.")
-        self.mensagem_organizacao.configure(text="Esta e a simulacao do destino final. Nenhuma pasta foi criada ainda.")
-
     def _exibir_movimentos(self, pasta: Path, movimentos: list[tuple[Path, Path]]) -> None:
         self.movimentos = movimentos
         self.trabalhando = False
@@ -875,14 +857,10 @@ class OrganizadorGUI:
         self.movimentos = []
         self.lista_movimentos.delete(0, tk.END)
         self.botao_mover.configure(state="disabled")
-        self._ultimo_percentual_atualizado = 100
-        self.progresso_texto.set("100%")
-        self.percentual_analise.set("100% da transferência concluída")
-        self.status.set(f"{movidos} arquivo(s) movido(s) com sucesso.")
-        self.arquivo_atual.set("")
-        self._resetar_mensagens_trabalho()
-        self.trabalhando = False
-        self.janela.update_idletasks()
+        self._resetar_estado_final(f"{movidos} arquivo(s) movido(s) com sucesso.")
+        self.mensagem_organizacao.configure(
+            text="Arquivos organizados. Clique em Analisar pasta para verificar novamente."
+        )
         messagebox.showinfo("Concluido", f"{movidos} arquivo(s) foram organizados.")
 
     def analisar_duplicados(self) -> None:
@@ -1008,14 +986,20 @@ class OrganizadorGUI:
             return
 
         arquivos = list(caminhos)
+        total = len(arquivos)
         self._set_estado_trabalho(True, "Enviando arquivos para a Lixeira...", "Preparando exclusao...")
 
         def executar() -> None:
             log = pasta / "organizador_log.txt"
             enviados = 0
             try:
-                for caminho in arquivos:
-                    self.janela.after(0, lambda caminho=caminho: self._set_estado_trabalho(True, "Enviando arquivos para a Lixeira...", f"Arquivo atual: {caminho.name}"))
+                for indice, caminho in enumerate(arquivos, start=1):
+                    self.janela.after(
+                        0,
+                        lambda i=indice, c=caminho: self._atualizar_progresso_movimentacao(
+                            i, total, c.name, etapa="exclusão"
+                        ),
+                    )
                     try:
                         enviar_para_lixeira(caminho)
                         registrar(log, f"ENVIADO PARA A LIXEIRA | {caminho.relative_to(pasta)}")
@@ -1023,20 +1007,13 @@ class OrganizadorGUI:
                     except OSError as erro:
                         registrar(log, f"ERRO AO APAGAR | {caminho} | {erro}")
             finally:
-                self.janela.after(0, self._finalizar_exclusao)
+                self.janela.after(0, lambda: self._finalizar_exclusao(enviados))
 
         threading.Thread(target=executar, daemon=True).start()
 
-    def _finalizar_exclusao(self) -> None:
+    def _finalizar_exclusao(self, enviados: int) -> None:
         self.analisar_duplicados()
-        self._ultimo_percentual_atualizado = 100
-        self.progresso_texto.set("100%")
-        self.percentual_analise.set("100% da análise concluída")
-        self.status.set(f"{len(self.grupos_duplicados)} arquivo(s) enviado(s) para a Lixeira.")
-        self.arquivo_atual.set("")
-        self._resetar_mensagens_trabalho()
-        self.trabalhando = False
-        self.janela.update_idletasks()
+        messagebox.showinfo("Concluido", f"{enviados} arquivo(s) foram enviados para a Lixeira.")
 
 
 def iniciar_interface(pasta_inicial: Path | None = None) -> None:
